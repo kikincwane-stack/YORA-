@@ -1,0 +1,219 @@
+import { useEffect, useRef, type ReactNode } from "react";
+import { ClerkProvider, SignIn, SignUp, Show, useClerk } from "@clerk/react";
+import { publishableKeyFromHost } from "@clerk/react/internal";
+import { shadcn } from "@clerk/themes";
+import {
+  QueryClient,
+  QueryClientProvider,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { ErrorBoundary } from "@/components/error-boundary";
+import { Toaster } from "@/components/ui/toaster";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import HomePage from "@/pages/home";
+import UserPortalPage from "@/pages/user-portal";
+import NotFound from "@/pages/not-found";
+import {
+  Redirect,
+  Route,
+  Switch,
+  useLocation,
+  Router as WouterRouter,
+} from "wouter";
+
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { staleTime: 20_000, retry: 1 } },
+});
+const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
+const clerkPubKey = publishableKeyFromHost(
+  window.location.hostname,
+  import.meta.env.VITE_CLERK_PUBLISHABLE_KEY,
+);
+const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;
+
+function stripBase(path: string) {
+  return basePath && path.startsWith(basePath)
+    ? path.slice(basePath.length) || "/"
+    : path;
+}
+
+const clerkAppearance = {
+  theme: shadcn,
+  cssLayerName: "clerk",
+  options: {
+    logoPlacement: "none" as const,
+    logoLinkUrl: basePath || "/",
+    logoImageUrl: `${window.location.origin}${basePath}/logo.svg`,
+  },
+  variables: {
+    colorPrimary: "#60418a",
+    colorForeground: "#352944",
+    colorMutedForeground: "#746a7b",
+    colorDanger: "#a54840",
+    colorBackground: "#fffdf8",
+    colorInput: "#fbf8f0",
+    colorInputForeground: "#352944",
+    colorNeutral: "#352944",
+    fontFamily: "DM Sans, sans-serif",
+    borderRadius: "0.85rem",
+  },
+  elements: {
+    rootBox: "w-full flex justify-center",
+    cardBox:
+      "bg-[#fffdf8] rounded-[24px] w-[440px] max-w-full overflow-hidden shadow-xl",
+    card: "!shadow-none !border-0 !bg-transparent !rounded-none",
+    footer: "!shadow-none !border-0 !bg-transparent !rounded-none",
+    headerTitle: "text-[#352944] font-serif",
+    headerSubtitle: "text-[#746a7b]",
+    socialButtonsBlockButtonText: "text-[#352944]",
+    formFieldLabel: "text-[#483c53]",
+    footerActionLink: "text-[#60418a] font-semibold",
+    footerActionText: "text-[#746a7b]",
+    dividerText: "text-[#746a7b]",
+    identityPreviewEditButton: "text-[#60418a]",
+    formFieldSuccessText: "text-[#397c65]",
+    alertText: "text-[#a54840]",
+    logoBox: "rounded-full overflow-hidden",
+    logoImage: "rounded-full",
+    socialButtonsBlockButton:
+      "border-[#e8dfd3] bg-[#fffdf8] hover:bg-[#f6f0e7]",
+    formButtonPrimary: "bg-[#60418a] hover:bg-[#4d3471] shadow-none",
+    formFieldInput: "border-[#e5dbce] bg-[#fbf8f0] text-[#352944]",
+    footerAction: "border-t border-[#eee6dc]",
+    dividerLine: "bg-[#e8dfd3]",
+    alert: "bg-[#fbefec] border-[#ead0ca]",
+    otpCodeFieldInput: "border-[#e5dbce] bg-[#fbf8f0]",
+    formFieldRow: "gap-2",
+    main: "gap-5",
+  },
+};
+
+function ClerkQueryClientCacheInvalidator() {
+  const { addListener } = useClerk();
+  const client = useQueryClient();
+  const previousUserId = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    const unsubscribe = addListener(({ user }) => {
+      const userId = user?.id ?? null;
+      if (
+        previousUserId.current !== undefined &&
+        previousUserId.current !== userId
+      )
+        client.clear();
+      previousUserId.current = userId;
+    });
+    return unsubscribe;
+  }, [addListener, client]);
+  return null;
+}
+
+function HomeRedirect() {
+  return (
+    <>
+      <Show when="signed-in">
+        <Redirect to="/user-portal" />
+      </Show>
+      <Show when="signed-out">
+        <HomePage />
+      </Show>
+    </>
+  );
+}
+
+function ProtectedPortal() {
+  return (
+    <>
+      <Show when="signed-in">
+        <UserPortalPage />
+      </Show>
+      <Show when="signed-out">
+        <Redirect to="/" />
+      </Show>
+    </>
+  );
+}
+
+function SignInPage() {
+  return (
+    <main className="auth-stage">
+      <SignIn
+        routing="path"
+        path={`${basePath}/sign-in`}
+        signUpUrl={`${basePath}/sign-up`}
+      />
+    </main>
+  );
+}
+
+function SignUpPage() {
+  return (
+    <main className="auth-stage">
+      <SignUp
+        routing="path"
+        path={`${basePath}/sign-up`}
+        signInUrl={`${basePath}/sign-in`}
+      />
+    </main>
+  );
+}
+
+function RoutedErrorBoundary({ children }: { children: ReactNode }) {
+  const [location] = useLocation();
+  return <ErrorBoundary resetKey={location}>{children}</ErrorBoundary>;
+}
+
+function ClerkRoutes() {
+  const [, setLocation] = useLocation();
+  return (
+    <ClerkProvider
+      publishableKey={clerkPubKey}
+      proxyUrl={clerkProxyUrl}
+      appearance={clerkAppearance}
+      signInUrl={`${basePath}/sign-in`}
+      signUpUrl={`${basePath}/sign-up`}
+      localization={{
+        signIn: {
+          start: {
+            title: "Good to have you back",
+            subtitle: "Your next read is waiting.",
+          },
+        },
+        signUp: {
+          start: {
+            title: "Find your people",
+            subtitle: "A little more poetry in your day.",
+          },
+        },
+      }}
+      routerPush={(to) => setLocation(stripBase(to))}
+      routerReplace={(to) => setLocation(stripBase(to), { replace: true })}
+    >
+      <QueryClientProvider client={queryClient}>
+        <ClerkQueryClientCacheInvalidator />
+        <RoutedErrorBoundary>
+          <Switch>
+            <Route path="/" component={HomeRedirect} />
+            <Route path="/poems" component={UserPortalPage} />
+            <Route path="/user-portal" component={ProtectedPortal} />
+            <Route path="/sign-in/*?" component={SignInPage} />
+            <Route path="/sign-up/*?" component={SignUpPage} />
+            <Route component={NotFound} />
+          </Switch>
+        </RoutedErrorBoundary>
+      </QueryClientProvider>
+    </ClerkProvider>
+  );
+}
+
+function App() {
+  return (
+    <TooltipProvider>
+      <WouterRouter base={basePath}>
+        <ClerkRoutes />
+      </WouterRouter>
+      <Toaster />
+    </TooltipProvider>
+  );
+}
+
+export default App;
